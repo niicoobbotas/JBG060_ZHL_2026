@@ -1,12 +1,13 @@
 import numpy as np
 import pandas as pd
 
-BETA = 3  # recall counts BETA times as much as precision; raise it to punish missed floods harder
+BETA = 2  # recall counts BETA times as much as precision; raise it to punish missed floods harder
 keys = ["adm2_pcode", "target_year", "target_month", "lead"]
 
 rf = pd.read_csv("processing_data/floods/forecasts_rf.csv")[keys + ["flood", "p_rf"]]
 xg = pd.read_csv("processing_data/floods/forecasts.csv")[keys + ["p_flood"]].rename(columns={"p_flood": "p_xgb"})
-d = rf.merge(xg, on=keys)  # identical rows for both models, all test years pooled
+lr = pd.read_csv("processing_data/floods/forecasts_lr.csv")[keys + ["p_lr"]]
+d = rf.merge(xg, on=keys).merge(lr, on=keys)  # identical rows for all three models, all test years pooled
 
 grid = np.round(np.arange(0.001, 1.0, 0.001), 3)
 
@@ -31,12 +32,13 @@ def best_point(y, p):
             f"F{BETA}": fbeta[i]}
 
 
-for name, col in [("XGBoost", "p_xgb"), ("Random Forest", "p_rf")]:
-    rows = []
-    for h, s in d.groupby("lead"):
-        rows.append({"lead": f"{h} month(s)", **best_point(s["flood"].values, s[col].values)})
-    t = pd.DataFrame(rows)
-    for c in ["accuracy", "precision", "FPR", "FNR", f"F{BETA}"]:
-        t[c] = (t[c] * 100).round(1).astype(str) + "%"
-    print(f"\n{name}: threshold maximising F{BETA} per lead")
-    print(t.to_string(index=False))
+models = [("Logistic Regression", "p_lr"), ("XGBoost", "p_xgb"), ("Random Forest", "p_rf")]
+rows = []
+for h, s in d.groupby("lead"):
+    for name, col in models:
+        rows.append({"lead": f"{h} month(s)", "model": name, **best_point(s["flood"].values, s[col].values)})
+t = pd.DataFrame(rows)
+for c in ["accuracy", "precision", "FPR", "FNR", f"F{BETA}"]:
+    t[c] = (t[c] * 100).round(1).astype(str) + "%"
+print(f"\nThreshold maximising F{BETA} per lead and model")
+print(t.to_string(index=False))
