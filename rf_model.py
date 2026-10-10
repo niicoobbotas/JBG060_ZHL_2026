@@ -10,6 +10,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, RocCurveDisplay
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score
 import matplotlib.pyplot as plt
+import shap
+
 
 PANEL_PATH = Path("./processed_data_rf/flood_panel.parquet")
 OUT_DIR = Path("./processed_data_rf")
@@ -119,6 +121,30 @@ def main():
     print("\n--- Feature importances ---")
     print(importances.to_string())
 
+    suffix = "_hazard_only" if HAZARD_ONLY else ""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if shap is not None:
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_test)
+
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]
+        elif getattr(shap_values, "ndim", 1) == 3:
+            shap_values = shap_values[:, :, 1]
+
+        shap_importance = pd.Series(np.abs(shap_values).mean(axis=0), index=feature_cols).sort_values(ascending=False)
+        print("\n--- SHAP feature importance ---")
+        print(shap_importance.to_string())
+
+        shap.summary_plot(shap_values, X_test, feature_names=feature_cols, max_display=15, plot_type="bar")
+        plt.tight_layout()
+        shap_path = OUT_DIR / f"rf_shap_summary_{TARGET_COL}{suffix}_{FEATURE_VERSION}.png"
+        plt.savefig(shap_path, dpi=150)
+        print(f"\nSaved SHAP summary plot to {shap_path}")
+    else:
+        print("\nSHAP is not installed. Install it with 'python -m pip install shap' to generate SHAP plots.")
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     importances.head(15).iloc[::-1].plot.barh(ax=axes[0])
     axes[0].set_title("Top 15 feature importances")
@@ -126,7 +152,6 @@ def main():
     axes[1].set_title("ROC curve (test set)")
     plt.tight_layout()
 
-    suffix = "_hazard_only" if HAZARD_ONLY else ""
     out_path = OUT_DIR / f"rf_evaluation_{TARGET_COL}{suffix}_{FEATURE_VERSION}.png"
     plt.savefig(out_path, dpi=150)
     print(f"\nSaved evaluation plot to {out_path}")
